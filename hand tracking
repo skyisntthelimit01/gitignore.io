@@ -1,0 +1,136 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+
+class FingerCounter:
+    def __init__(self):
+        # Initialize MediaPipe hands
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.5
+        )
+        self.mp_draw = mp.solutions.drawing_utils
+        
+        # Finger tip and pip landmark IDs
+        self.tip_ids = [4, 8, 12, 16, 20]  # Thumb, Index, Middle, Ring, Pinky tips
+        self.pip_ids = [3, 6, 10, 14, 18]  # Corresponding PIP joints
+        
+    def count_fingers(self, landmarks):
+        """Count the number of extended fingers"""
+        fingers = []
+        
+        # Thumb (special case - compare x coordinates)
+        if landmarks[self.tip_ids[0]][0] > landmarks[self.tip_ids[0] - 1][0]:
+            fingers.append(1)
+        else:
+            fingers.append(0)
+            
+        # Other four fingers (compare y coordinates)
+        for i in range(1, 5):
+            if landmarks[self.tip_ids[i]][1] < landmarks[self.pip_ids[i]][1]:
+                fingers.append(1)
+            else:
+                fingers.append(0)
+                
+        return fingers.count(1)
+    
+    def draw_finger_info(self, img, finger_count, hand_label="Hand"):
+        """Draw finger count and hand information on the image"""
+        # Background rectangle for text
+        cv2.rectangle(img, (10, 10), (300, 100), (0, 0, 0), -1)
+        
+        # Finger count text
+        cv2.putText(img, f"{hand_label}: {finger_count} fingers", 
+                   (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        # Instructions
+        cv2.putText(img, "Press 'q' to quit", 
+                   (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        
+        return img
+    
+    def run(self):
+        """Main function to run the finger counter"""
+        # Initialize camera
+        cap = cv2.VideoCapture(0)
+        
+        if not cap.isOpened():
+            print("Error: Could not open camera")
+            return
+        
+        print("Finger Counter Started!")
+        print("Show your hand(s) to the camera")
+        print("Press 'q' to quit")
+        
+        while True:
+            success, img = cap.read()
+            if not success:
+                print("Failed to read from camera")
+                break
+            
+            # Flip image horizontally for mirror effect
+            img = cv2.flip(img, 1)
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            
+            # Process the image
+            results = self.hands.process(img_rgb)
+            
+            total_fingers = 0
+            
+            if results.multi_hand_landmarks:
+                for hand_idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
+                    # Draw hand landmarks
+                    self.mp_draw.draw_landmarks(
+                        img, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+                    
+                    # Get landmark positions
+                    landmarks = []
+                    for lm in hand_landmarks.landmark:
+                        h, w, c = img.shape
+                        cx, cy = int(lm.x * w), int(lm.y * h)
+                        landmarks.append([cx, cy])
+                    
+                    # Count fingers for this hand
+                    finger_count = self.count_fingers(landmarks)
+                    total_fingers += finger_count
+                    
+                    # Determine hand label (left or right)
+                    hand_label = "Right Hand" if hand_idx == 0 else "Left Hand"
+                    if len(results.multi_hand_landmarks) == 1:
+                        hand_label = "Hand"
+                    
+                    # Draw finger count near the hand
+                    if landmarks:
+                        cv2.putText(img, str(finger_count), 
+                                   (landmarks[9][0] - 25, landmarks[9][1] - 25),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0), 3)
+            
+            # Draw total finger count and info
+            self.draw_finger_info(img, total_fingers, "Total")
+            
+            # Show the image
+            cv2.imshow("Finger Counter", img)
+            
+            # Break loop on 'q' key press
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        
+        # Cleanup
+        cap.release()
+        cv2.destroyAllWindows()
+
+def main():
+    """Main function to run the application"""
+    try:
+        counter = FingerCounter()
+        counter.run()
+    except Exception as e:
+        print(f"Error: {e}")
+        print("Make sure you have installed the required packages:")
+        print("pip install opencv-python mediapipe numpy")
+
+if __name__ == "__main__":
+    main()
